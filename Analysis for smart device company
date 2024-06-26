@@ -1,0 +1,131 @@
+install.packages("tidyverse")
+install.packages("lubridate")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("tidyr")
+install.packages("here")
+install.packages("skimr")
+install.packages("janitor")
+install.packages("patchwork")
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(here)
+library(skimr)
+library(janitor)
+library(patchwork)
+#Prepare the data
+DailyActivity <-read.csv("dailyActivity_merged.csv")
+glimpse(DailyActivity)
+SleepDay <-read.csv("sleepDay_merged.csv")
+glimpse(SleepDay)
+n_distinct(DailyActivity$Id)
+n_distinct(SleepDay$Id)
+#Process the data
+DailyActivity$ActivityDate <- mdy(DailyActivity$ActivityDate) 
+DailyActivity$Id <- as.character(DailyActivity$Id)
+DailyActivity <- rename(DailyActivity, Date = ActivityDate)
+glimpse(DailyActivity)
+SleepDay$SleepDay <- dmy(SleepDay$SleepDay) 
+SleepDay$Id <- as.character(SleepDay$Id)
+SleepDay <- rename(SleepDay, Date = SleepDay)
+glimpse(SleepDay)
+
+#Create columns
+DailyActivity1 <- DailyActivity %>%
+  mutate(day_of_week=weekdays(Date))
+glimpse(DailyActivity1)
+#Checking null values
+colSums(is.na(DailyActivity1))
+#Checking duplicates
+duplicated(DailyActivity1)
+
+
+# Analyze the data
+#average steps per day
+avg_number_of_steps_per_day <- DailyActivity1 %>%
+  group_by(day_of_week) %>%
+  summarize(avg_steps=mean(TotalSteps))
+view(avg_number_of_steps_per_day)
+
+avg_number_of_steps_per_day$day_of_week <- factor(avg_number_of_steps_per_day$day_of_week, c("Monday", "Tuesday", "Wednesday", "Thursday","Friday","Saturday", "Sunday"))
+view(avg_number_of_steps_per_day)
+ggplot(data=avg_number_of_steps_per_day)+geom_col(mapping=aes(x=day_of_week,y=avg_steps))+geom_hline(yintercept=mean(avg_number_of_steps_per_day$avg_steps),color="red")+labs(title = "Avg number of steps per day", x = "Day of week", y = "Steps")
+
+#Summary Statstics
+DailyActivity1 %>%
+  select(TotalSteps,TotalDistance,SedentaryMinutes,Calories) %>%
+  summary()
+ggplot(data=DailyActivity1, aes(x=TotalSteps, y=SedentaryMinutes)) + geom_point()
+SleepDay %>%
+  select(TotalSleepRecords,TotalMinutesAsleep,TotalTimeInBed) %>%
+  summary()
+ggplot(data=SleepDay, aes(x=TotalMinutesAsleep, y=TotalTimeInBed)) + geom_point()
+
+
+#Merging Data
+combined_data <- merge(SleepDay,DailyActivity1, by=c("Id","Date"),all=TRUE)
+glimpse(combined_data)
+skim_without_charts(combined_data)
+n_distinct(combined_data$Id)
+nrow(combined_data)
+
+combined_data_in_hours <- combined_data %>% 
+  mutate(total_hours_asleep = TotalMinutesAsleep/60,
+         very_active_hours = VeryActiveMinutes/60,
+         fairly_active_hours = FairlyActiveMinutes/60,
+         lightly_active_hours = LightlyActiveMinutes/60,
+         sedentary_hours = SedentaryMinutes/60) %>%
+  select(Id, Date, total_hours_asleep, very_active_hours, fairly_active_hours, lightly_active_hours, sedentary_hours, TotalSteps, TotalDistance)
+
+View(combined_data_in_hours)
+
+#Relationship between sleep & activity level
+mean_combined_data <- combined_data_in_hours %>%
+  group_by(Id) %>%
+  drop_na() %>%
+  summarize(mean_hours_asleep = mean(total_hours_asleep),
+            mean_very_active_hours = mean(very_active_hours),
+            mean_fairly_active_hours = mean(fairly_active_hours),
+            mean_lightly_active_hours = mean(lightly_active_hours),
+            mean_sedentary_hours = mean(sedentary_hours),
+            mean_steps = mean(TotalSteps),
+            mean_distance = mean(TotalDistance)) %>%
+  arrange(-mean_very_active_hours)
+View(mean_combined_data)
+
+mean_combined_data %>%
+  select(Id,mean_hours_asleep,mean_very_active_hours,mean_fairly_active_hours,mean_lightly_active_hours,mean_sedentary_hours) %>%
+  pivot_longer(cols=-c(Id,mean_hours_asleep),names_to="Activity_hours") %>%
+  ggplot(mapping=aes(x=mean_hours_asleep,y=value,color=Activity_hours))+
+  geom_point()+
+  ylim(0,20)+
+  geom_smooth(method="lm",se=FALSE)+
+  labs(title="Relationship between sleep and activity level")+
+  facet_wrap(~ Activity_hours,scales="free_y")+
+  scale_y_continuous(breaks = seq(0, 20, by = 1))
+
+#Note: The plot shows participants who got more sleep were less sedentary and being very active on average,
+
+#Relationship between steps and distance with activity level
+p1 <- ggplot(data = combined_data_in_hours, aes(x = TotalSteps)) +
+  geom_point(aes(y = very_active_hours, color = 'Very Active')) +
+  geom_smooth(aes(y = very_active_hours, color = 'Very Active'), method = "lm", se = FALSE) +
+  geom_point(aes(y = fairly_active_hours, color = 'Fairly Active')) +
+  geom_smooth(aes(y = fairly_active_hours, color = 'Fairly Active'), method = "lm", se = FALSE) +
+  geom_point(aes(y = lightly_active_hours, color = 'Lightly Active')) +
+  geom_smooth(aes(y = lightly_active_hours, color = 'Lightly Active'), method = "lm", se = FALSE) +
+  labs(title = "Steps v. Active Hours", x = "Steps", y = "Hours", color = "Activity Level")
+
+p2 <- ggplot(data = combined_data_in_hours, aes(x = TotalDistance)) +
+  geom_point(aes(y = very_active_hours, color = 'Very Active')) +
+  geom_smooth(aes(y = very_active_hours, color = 'Very Active'), method = "lm", se = FALSE) +
+  geom_point(aes(y = fairly_active_hours, color = 'Fairly Active')) +
+  geom_smooth(aes(y = fairly_active_hours, color = 'Fairly Active'), method = "lm", se = FALSE) +
+  geom_point(aes(y = lightly_active_hours, color = 'Lightly Active')) +
+  geom_smooth(aes(y = lightly_active_hours, color = 'Lightly Active'), method = "lm", se = FALSE) +
+  labs(title = "Distance v. Active Hours", x = "Distance", y = "Hours", color = "Activity Level")
+combined_plot <- p1 / p2
+combined_plot
